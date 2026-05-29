@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsr generate && vinxi build",
-    "dev": "tsr generate && vinxi dev",
+    "build": "vinxi build",
+    "dev": "vinxi dev",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
     "start": "vinxi start",
