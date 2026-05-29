@@ -108,6 +108,12 @@ jobs:
       - name: Deploy to staging (local runner)
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # Tear down any existing stack first (no-op if nothing is running)
+          podman-compose \
+            -f infra/compose.yaml \
+            down --remove-orphans || true
+
           IMAGE_TAG=sha-${SHORT_SHA} \
           REGISTRY_OWNER=${{ github.repository_owner }} \
           NODE_ENV=staging \
@@ -115,7 +121,7 @@ jobs:
             --podman-pull-args="--tls-verify=false" \
             -f infra/compose.yaml \
             --env-file infra/env/.env.staging \
-            up -d --remove-orphans
+            up -d
           echo ""
           echo "Services running:"
           echo "  postgres        → localhost:5432"
