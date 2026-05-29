@@ -1,4 +1,4 @@
-import { StartClient } from "@tanstack/start";
+import { StartClient } from "@tanstack/react-start";
 import { createRouter } from "./router";
 import { hydrateRoot } from "react-dom/client";
 import { StrictMode } from "react";

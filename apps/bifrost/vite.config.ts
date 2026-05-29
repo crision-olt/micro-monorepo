@@ -1,4 +1,6 @@
-import { defineConfig } from "@tanstack/start/config";
+import { defineConfig } from "vite";
+import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import react from "@vitejs/plugin-react";
 import federation from "@originjs/vite-plugin-federation";
 
 // Local dev default; overridden at build time via VITE_MFE_REMOTE_URL.
@@ -6,30 +8,22 @@ import federation from "@originjs/vite-plugin-federation";
 const mfeRemoteUrl =
   process.env.VITE_MFE_REMOTE_URL ?? "http://localhost:4001/assets/remoteEntry.js";
 
-export default defineConfig({
+export default defineConfig(({ isSsrBuild }) => ({
   server: {
     port: 4000,
   },
-  vite: {
-    plugins: [
+  plugins: [
+    tanstackStart({ customViteReactPlugin: true }),
+    react(),
+    !isSsrBuild &&
       federation({
         name: "bifrost",
         remotes: {
           himinbjorgPortal: mfeRemoteUrl,
         },
-        shared: ["react", "react-dom"],
       }),
-    ],
-    build: {
-      target: "esnext",
-    },
+  ],
+  build: {
+    target: "esnext",
   },
-  routers: {
-    ssr: {
-      entry: "./src/entry-server.tsx",
-    },
-    client: {
-      entry: "./src/entry-client.tsx",
-    },
-  },
-});
+}));

@@ -19,5 +19,11 @@
     "vite": "^6.0.0",
     "typescript": "^5.5.4"
   },
-  "packageManager": "pnpm@9.7.1"
+  "packageManager": "pnpm@9.7.1",
+  "pnpm": {
+    "overrides": {
+      "@tanstack/react-router": "1.131.50",
+      "@tanstack/router-core": "1.131.50"
+    }
+  }
 }
