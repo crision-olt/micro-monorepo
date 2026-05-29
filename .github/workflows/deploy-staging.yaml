@@ -32,7 +32,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-      pull-requests: write   # needed to post the reaction/comment back
+      pull-requests: write   # needed to post the reaction back
+      issues: write          # needed for issues.createComment on the PR thread
 
     steps:
       - name: React to the comment (acknowledge)
@@ -54,7 +55,7 @@ jobs:
       - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+            podman login ghcr.io -u "${{ github.actor }}" --password-stdin --tls-verify=false
 
       - uses: pnpm/action-setup@v4
 
@@ -66,34 +67,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build himinbjorg-portal static assets
-        run: |
-          pnpm --filter @repo/types build
-          pnpm --filter @repo/utils build
-          pnpm --filter @repo/ui build
-          pnpm --filter @repo/himinbjorg-portal build
-
-      - name: Serve himinbjorg-portal on staging port
-        run: |
-          # Kill any previous staging MFE server
-          pkill -f "serve.*himinbjorg" || true
-          # Serve the built assets on port 4001 in the background
-          npx --yes serve -s apps/himinbjorg-portal/dist -l 4001 &
-          echo "himinbjorg-portal serving on http://localhost:4001"
-
-      - name: Build and push backend + bifrost images
+      - name: Build and push all images
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
+          # himinbjorg-portal runs as a container on port 4001; the browser reaches
+          # it via the host's localhost because compose publishes the port.
           MFE_URL="http://localhost:4001/assets/remoteEntry.js"
 
-          for app in heimdall references-api; do
+          for app in heimdall references-api himinbjorg-portal; do
             podman build \
               --file infra/containerfiles/Containerfile.${app} \
               --tag ghcr.io/${{ github.repository_owner }}/${app}:staging \
               --tag ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA} \
               .
-            podman push ghcr.io/${{ github.repository_owner }}/${app}:staging
-            podman push ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
+            podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/${app}:staging
+            podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
           done
 
           podman build \
@@ -102,12 +90,18 @@ jobs:
             --tag ghcr.io/${{ github.repository_owner }}/bifrost:staging \
             --tag ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA} \
             .
-          podman push ghcr.io/${{ github.repository_owner }}/bifrost:staging
-          podman push ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
+          podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/bifrost:staging
+          podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
 
       - name: Deploy to staging (local runner)
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
+
+          # Tear down any existing stack first (no-op if nothing is running)
+          podman-compose \
+            -f infra/compose.yaml \
+            down --remove-orphans || true
+
           IMAGE_TAG=sha-${SHORT_SHA} \
           REGISTRY_OWNER=${{ github.repository_owner }} \
           NODE_ENV=staging \
@@ -115,7 +109,7 @@ jobs:
             --podman-pull-args="--tls-verify=false" \
             -f infra/compose.yaml \
             --env-file infra/env/.env.staging \
-            up -d --remove-orphans
+            up -d
           echo ""
           echo "Services running:"
           echo "  postgres        → localhost:5432"

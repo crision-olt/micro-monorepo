@@ -55,6 +55,13 @@ services:
     ports:
       - "${REFERENCES_API_PORT:-3002}:3002"
 
+  himinbjorg-portal:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/himinbjorg-portal:${IMAGE_TAG:-latest}
+    container_name: micro_himinbjorg_portal
+    restart: unless-stopped
+    ports:
+      - "${HIMINBJORG_PORT:-4001}:4001"
+
   bifrost:
     image: ghcr.io/${REGISTRY_OWNER:-local}/bifrost:${IMAGE_TAG:-latest}
     container_name: micro_bifrost
