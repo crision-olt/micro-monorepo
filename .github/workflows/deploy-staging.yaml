@@ -32,7 +32,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-      pull-requests: write   # needed to post the reaction/comment back
+      pull-requests: write   # needed to post the reaction back
+      issues: write          # needed for issues.createComment on the PR thread
 
     steps:
       - name: React to the comment (acknowledge)
