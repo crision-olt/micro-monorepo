@@ -54,7 +54,7 @@ jobs:
       - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+            podman login ghcr.io -u "${{ github.actor }}" --password-stdin --tls-verify=false
 
       - uses: pnpm/action-setup@v4
 
@@ -92,8 +92,8 @@ jobs:
               --tag ghcr.io/${{ github.repository_owner }}/${app}:staging \
               --tag ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA} \
               .
-            podman push ghcr.io/${{ github.repository_owner }}/${app}:staging
-            podman push ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
+            podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/${app}:staging
+            podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
           done
 
           podman build \
@@ -102,8 +102,8 @@ jobs:
             --tag ghcr.io/${{ github.repository_owner }}/bifrost:staging \
             --tag ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA} \
             .
-          podman push ghcr.io/${{ github.repository_owner }}/bifrost:staging
-          podman push ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
+          podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/bifrost:staging
+          podman push --tls-verify=false ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
 
       - name: Deploy to staging (local runner)
         run: |

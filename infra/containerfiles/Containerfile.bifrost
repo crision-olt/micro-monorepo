@@ -25,7 +25,7 @@ COPY packages/types/tsconfig.json  packages/types/
 COPY packages/utils/src            packages/utils/src
 COPY packages/utils/tsconfig.json  packages/utils/
 COPY packages/ui/src               packages/ui/src
-COPY packages/ui/package.json      packages/ui/
+COPY packages/ui/tsconfig.json     packages/ui/
 COPY apps/bifrost                  apps/bifrost/
 COPY tsconfig.base.json ./
 RUN pnpm --filter @repo/types build
