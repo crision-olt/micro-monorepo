@@ -1,0 +1,103 @@
+name: Deploy → production
+
+# Triggered when a PR from develop into main is merged
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false   # never cancel an in-flight production deploy
+
+jobs:
+  build:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'develop'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.sha.outputs.short }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push backend images
+        run: |
+          SHORT_SHA="${{ steps.sha.outputs.short }}"
+          VERSION=$(node -p "require('./package.json').version")
+          for app in heimdall references-api; do
+            podman build \
+              --file infra/containerfiles/Containerfile.${app} \
+              --tag ghcr.io/${{ github.repository_owner }}/${app}:latest \
+              --tag ghcr.io/${{ github.repository_owner }}/${app}:${VERSION} \
+              --tag ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA} \
+              .
+            podman push ghcr.io/${{ github.repository_owner }}/${app}:latest
+            podman push ghcr.io/${{ github.repository_owner }}/${app}:${VERSION}
+            podman push ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
+          done
+
+      - name: Build and push bifrost (SSR shell)
+        run: |
+          SHORT_SHA="${{ steps.sha.outputs.short }}"
+          VERSION=$(node -p "require('./package.json').version")
+          # himinbjorg-portal is deployed to GitHub Pages at a predictable URL
+          MFE_URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/remoteEntry.js"
+          podman build \
+            --file infra/containerfiles/Containerfile.bifrost \
+            --build-arg VITE_MFE_REMOTE_URL="${MFE_URL}" \
+            --tag ghcr.io/${{ github.repository_owner }}/bifrost:latest \
+            --tag ghcr.io/${{ github.repository_owner }}/bifrost:${VERSION} \
+            --tag ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA} \
+            .
+          podman push ghcr.io/${{ github.repository_owner }}/bifrost:latest
+          podman push ghcr.io/${{ github.repository_owner }}/bifrost:${VERSION}
+          podman push ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
+
+  deploy:
+    name: Deploy to production
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production   # requires manual approval if configured in repo settings
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        env:
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          SHORT_SHA="${{ needs.build.outputs.image_tag }}"
+
+          install -m 600 /dev/null /tmp/deploy_key
+          echo "${DEPLOY_SSH_KEY}" > /tmp/deploy_key
+
+          ssh -i /tmp/deploy_key \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${PRODUCTION_HOST}" \
+            "IMAGE_TAG=sha-${SHORT_SHA} \
+             REGISTRY_OWNER=${{ github.repository_owner }} \
+             NODE_ENV=production \
+             podman compose -f ~/infra/compose.yaml --env-file ~/infra/env/.env.production pull && \
+             podman compose -f ~/infra/compose.yaml --env-file ~/infra/env/.env.production up -d --remove-orphans"
+
+          rm -f /tmp/deploy_key

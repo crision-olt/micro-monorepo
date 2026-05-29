@@ -1,0 +1,81 @@
+name: Deploy → GitHub Pages (himinbjorg-portal)
+
+# Deploy the MFE remote on every push to main (after release merge)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/himinbjorg-portal/**"
+      - "packages/**"
+      - ".github/workflows/deploy-pages.yaml"
+
+  # Allow manual re-deploy from Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9"
+
+jobs:
+  build:
+    name: Build himinbjorg-portal
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      # Expose the Pages URL so bifrost can be rebuilt with the correct remote URL
+      pages_url: ${{ steps.pages.outputs.base_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace packages
+        run: pnpm --filter @repo/types build && pnpm --filter @repo/utils build && pnpm --filter @repo/ui build
+
+      - name: Build himinbjorg-portal
+        run: pnpm --filter @repo/himinbjorg-portal build
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Vite outputs to apps/himinbjorg-portal/dist
+          path: apps/himinbjorg-portal/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

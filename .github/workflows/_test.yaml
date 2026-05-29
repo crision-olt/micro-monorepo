@@ -1,0 +1,53 @@
+name: _test
+
+on:
+  workflow_call:
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: docker.io/postgres:16-alpine
+        env:
+          POSTGRES_USER: micro
+          POSTGRES_PASSWORD: micro
+          POSTGRES_DB: micro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U micro -d micro_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://micro:micro@localhost:5432/micro_test
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm run test

@@ -1,0 +1,50 @@
+# Multi-stage build for @repo/bifrost (TanStack Start SSR)
+# Build context: repo root (.)
+# VITE_MFE_REMOTE_URL must be set at build time to point to the deployed himinbjorg-portal.
+
+FROM docker.io/node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /repo
+
+# ── deps stage ────────────────────────────────────────────────────────────────
+FROM base AS deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/types/package.json   packages/types/
+COPY packages/utils/package.json   packages/utils/
+COPY packages/ui/package.json      packages/ui/
+COPY apps/bifrost/package.json     apps/bifrost/
+RUN pnpm install --frozen-lockfile --filter @repo/bifrost...
+
+# ── build stage ───────────────────────────────────────────────────────────────
+FROM deps AS build
+ARG VITE_MFE_REMOTE_URL
+ENV VITE_MFE_REMOTE_URL=${VITE_MFE_REMOTE_URL}
+
+COPY packages/types/src            packages/types/src
+COPY packages/types/tsconfig.json  packages/types/
+COPY packages/utils/src            packages/utils/src
+COPY packages/utils/tsconfig.json  packages/utils/
+COPY packages/ui/src               packages/ui/src
+COPY packages/ui/package.json      packages/ui/
+COPY apps/bifrost                  apps/bifrost/
+COPY tsconfig.base.json ./
+RUN pnpm --filter @repo/types build
+RUN pnpm --filter @repo/utils build
+RUN pnpm --filter @repo/ui build
+RUN pnpm --filter @repo/bifrost build
+
+# ── runtime stage ─────────────────────────────────────────────────────────────
+# Keep /repo tree so pnpm symlinks resolve correctly.
+FROM docker.io/node:22-alpine AS runtime
+WORKDIR /repo
+
+COPY --from=build /repo/apps/bifrost/.output          apps/bifrost/.output
+COPY --from=build /repo/apps/bifrost/package.json     apps/bifrost/package.json
+COPY --from=build /repo/apps/bifrost/node_modules     apps/bifrost/node_modules
+COPY --from=build /repo/node_modules/.pnpm            node_modules/.pnpm
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/bifrost
+EXPOSE 4000
+
+CMD ["node", ".output/server/index.mjs"]

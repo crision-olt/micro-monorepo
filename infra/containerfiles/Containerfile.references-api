@@ -1,0 +1,45 @@
+# Multi-stage build for @repo/references-api (Fastify)
+# Build context: apps/references-api
+# Example: podman build -f infra/dockerfiles/Dockerfile.references-api -t references-api:dev apps/references-api
+
+FROM docker.io/node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /repo
+
+# ── deps stage ────────────────────────────────────────────────────────────────
+FROM base AS deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/types/package.json        packages/types/
+COPY packages/utils/package.json        packages/utils/
+COPY apps/references-api/package.json   apps/references-api/
+RUN pnpm install --frozen-lockfile --filter @repo/references-api...
+
+# ── build stage ───────────────────────────────────────────────────────────────
+FROM deps AS build
+COPY packages/types/src    packages/types/src
+COPY packages/types/tsconfig.json packages/types/
+COPY packages/utils/src    packages/utils/src
+COPY packages/utils/tsconfig.json packages/utils/
+COPY apps/references-api/src  apps/references-api/src
+COPY apps/references-api/tsconfig.json apps/references-api/
+COPY tsconfig.base.json ./
+RUN pnpm --filter @repo/types build
+RUN pnpm --filter @repo/utils build
+RUN pnpm --filter @repo/references-api build
+
+# ── runtime stage ─────────────────────────────────────────────────────────────
+# Keep the same /repo tree so pnpm's relative symlinks (../../../../node_modules/.pnpm/...)
+# resolve correctly at runtime without relinking.
+FROM docker.io/node:22-alpine AS runtime
+WORKDIR /repo
+
+COPY --from=build /repo/apps/references-api/dist         apps/references-api/dist
+COPY --from=build /repo/apps/references-api/package.json  apps/references-api/package.json
+COPY --from=build /repo/apps/references-api/node_modules  apps/references-api/node_modules
+COPY --from=build /repo/node_modules/.pnpm                node_modules/.pnpm
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/references-api
+EXPOSE 3002
+
+CMD ["node", "dist/main"]

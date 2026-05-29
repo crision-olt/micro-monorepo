@@ -1,0 +1,46 @@
+# Multi-stage build for @repo/heimdall (NestJS / Fastify)
+# Build context: apps/heimdall
+# Example: podman build -f infra/dockerfiles/Dockerfile.heimdall -t heimdall:dev apps/heimdall
+
+FROM docker.io/node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /repo
+
+# ── deps stage ────────────────────────────────────────────────────────────────
+FROM base AS deps
+# Copy workspace manifests so pnpm can resolve the workspace graph
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/types/package.json    packages/types/
+COPY packages/utils/package.json    packages/utils/
+COPY apps/heimdall/package.json     apps/heimdall/
+RUN pnpm install --frozen-lockfile --filter @repo/heimdall...
+
+# ── build stage ───────────────────────────────────────────────────────────────
+FROM deps AS build
+COPY packages/types/src    packages/types/src
+COPY packages/types/tsconfig.json packages/types/
+COPY packages/utils/src    packages/utils/src
+COPY packages/utils/tsconfig.json packages/utils/
+COPY apps/heimdall/src     apps/heimdall/src
+COPY apps/heimdall/tsconfig.json apps/heimdall/
+COPY tsconfig.base.json ./
+RUN pnpm --filter @repo/types build
+RUN pnpm --filter @repo/utils build
+RUN pnpm --filter @repo/heimdall build
+
+# ── runtime stage ─────────────────────────────────────────────────────────────
+# Keep the same /repo tree so pnpm's relative symlinks (../../../../node_modules/.pnpm/...)
+# resolve correctly at runtime without relinking.
+FROM docker.io/node:22-alpine AS runtime
+WORKDIR /repo
+
+COPY --from=build /repo/apps/heimdall/dist        apps/heimdall/dist
+COPY --from=build /repo/apps/heimdall/package.json apps/heimdall/package.json
+COPY --from=build /repo/apps/heimdall/node_modules apps/heimdall/node_modules
+COPY --from=build /repo/node_modules/.pnpm         node_modules/.pnpm
+
+ENV NODE_ENV=production
+WORKDIR /repo/apps/heimdall
+EXPOSE 3001
+
+CMD ["node", "dist/main"]
