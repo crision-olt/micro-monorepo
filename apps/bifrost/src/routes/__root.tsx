@@ -1,5 +1,5 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { Meta, Scripts } from "@tanstack/start";
+import { Meta, Scripts } from "@tanstack/react-start";
 import { Button } from "@repo/ui";
 import type { ReactNode } from "react";
 

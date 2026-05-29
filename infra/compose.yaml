@@ -1,0 +1,69 @@
+# Podman Compose — local development and remote deploy stack
+# Local:  make infra-up
+# Remote: IMAGE_TAG=sha-<sha> REGISTRY_OWNER=<org> podman compose -f infra/compose.yaml up -d
+---
+name: micro-monorepo
+
+services:
+  postgres:
+    image: docker.io/postgres:16-alpine
+    container_name: micro_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-micro_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-micro_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  heimdall:
+    # Local build (override IMAGE_TAG=local and build manually):
+    #   podman build -f infra/containerfiles/Containerfile.heimdall -t ghcr.io/<org>/heimdall:local apps/heimdall
+    # Remote: IMAGE_TAG and REGISTRY_OWNER are injected by the deploy workflow / Makefile
+    image: ghcr.io/${REGISTRY_OWNER:-local}/heimdall:${IMAGE_TAG:-latest}
+    container_name: micro_heimdall
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-micro_dev}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3001"
+    ports:
+      - "${HEIMDALL_PORT:-3001}:3001"
+
+  references-api:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/references-api:${IMAGE_TAG:-latest}
+    container_name: micro_references_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-micro_dev}
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3002"
+    ports:
+      - "${REFERENCES_API_PORT:-3002}:3002"
+
+  bifrost:
+    image: ghcr.io/${REGISTRY_OWNER:-local}/bifrost:${IMAGE_TAG:-latest}
+    container_name: micro_bifrost
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "4000"
+    ports:
+      - "${BIFROST_PORT:-4000}:4000"
+
+volumes:
+  postgres_data:

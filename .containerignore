@@ -1,0 +1,21 @@
+# Exclude node_modules at every level — pnpm symlinks break podman build context
+node_modules
+**/node_modules
+
+# Build output
+**/dist
+**/.turbo
+
+# Local env files — never bake into images
+infra/env/.env.*
+.env*
+
+# Git and editor
+.git
+.gitignore
+.vscode
+.idea
+
+# CI / docs
+.github
+*.md

@@ -1,0 +1,140 @@
+name: Deploy → staging
+
+# Triggered by a PR comment containing /deploy-in-staging
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: deploy-staging-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  deploy:
+    name: Deploy to staging
+    runs-on: self-hosted
+    environment: staging
+
+    # Only run when:
+    #   1. The comment is on a PR (not a plain issue)
+    #   2. The comment body is exactly "/deploy-in-staging"
+    #   3. The commenter has write access (prevents random contributors triggering deploys)
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/deploy-in-staging') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
+
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write   # needed to post the reaction/comment back
+
+    steps:
+      - name: React to the comment (acknowledge)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+      # Check out the PR branch, not main
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build himinbjorg-portal static assets
+        run: |
+          pnpm --filter @repo/types build
+          pnpm --filter @repo/utils build
+          pnpm --filter @repo/ui build
+          pnpm --filter @repo/himinbjorg-portal build
+
+      - name: Serve himinbjorg-portal on staging port
+        run: |
+          # Kill any previous staging MFE server
+          pkill -f "serve.*himinbjorg" || true
+          # Serve the built assets on port 4001 in the background
+          npx --yes serve -s apps/himinbjorg-portal/dist -l 4001 &
+          echo "himinbjorg-portal serving on http://localhost:4001"
+
+      - name: Build and push backend + bifrost images
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          MFE_URL="http://localhost:4001/assets/remoteEntry.js"
+
+          for app in heimdall references-api; do
+            podman build \
+              --file infra/containerfiles/Containerfile.${app} \
+              --tag ghcr.io/${{ github.repository_owner }}/${app}:staging \
+              --tag ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA} \
+              .
+            podman push ghcr.io/${{ github.repository_owner }}/${app}:staging
+            podman push ghcr.io/${{ github.repository_owner }}/${app}:sha-${SHORT_SHA}
+          done
+
+          podman build \
+            --file infra/containerfiles/Containerfile.bifrost \
+            --build-arg VITE_MFE_REMOTE_URL="${MFE_URL}" \
+            --tag ghcr.io/${{ github.repository_owner }}/bifrost:staging \
+            --tag ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA} \
+            .
+          podman push ghcr.io/${{ github.repository_owner }}/bifrost:staging
+          podman push ghcr.io/${{ github.repository_owner }}/bifrost:sha-${SHORT_SHA}
+
+      - name: Deploy to staging (local runner)
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          IMAGE_TAG=sha-${SHORT_SHA} \
+          REGISTRY_OWNER=${{ github.repository_owner }} \
+          NODE_ENV=staging \
+          podman-compose \
+            --podman-pull-args="--tls-verify=false" \
+            -f infra/compose.yaml \
+            --env-file infra/env/.env.staging \
+            up -d --remove-orphans
+          echo ""
+          echo "Services running:"
+          echo "  postgres        → localhost:5432"
+          echo "  heimdall        → http://localhost:3001"
+          echo "  references-api  → http://localhost:3002"
+          echo "  bifrost         → http://localhost:4000"
+          echo "  himinbjorg-portal (static) → http://localhost:4001"
+
+      - name: Post result comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const success = '${{ job.status }}' === 'success';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: success
+                ? '✅ Deployed to **staging** — SHA `${{ github.sha }}`'
+                : '❌ Staging deploy failed — check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})',
+            });

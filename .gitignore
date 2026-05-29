@@ -1,8 +1,17 @@
 node_modules/
 dist/
 .turbo/
+.output/
+.nitro/
+.tanstack/
 *.log
 *.tsbuildinfo
+
+# Generic env files (root-level secrets)
 .env
 .env.local
 .env.*.local
+
+# Infra env: ignore staging/production (real secrets), keep local (no secrets)
+infra/env/.env.staging
+infra/env/.env.production
