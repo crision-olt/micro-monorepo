@@ -66,28 +66,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build himinbjorg-portal static assets
-        run: |
-          pnpm --filter @repo/types build
-          pnpm --filter @repo/utils build
-          pnpm --filter @repo/ui build
-          pnpm --filter @repo/himinbjorg-portal build
-
-      - name: Serve himinbjorg-portal on staging port
-        run: |
-          # Kill any previous staging MFE server
-          pkill -f "serve.*himinbjorg" || true
-          # Serve the built assets on port 4001 in the background, fully detached
-          nohup npx --yes serve -s apps/himinbjorg-portal/dist -l 4001 </dev/null >himinbjorg-serve.log 2>&1 &
-          disown
-          echo "himinbjorg-portal serving on http://localhost:4001"
-
-      - name: Build and push backend + bifrost images
+      - name: Build and push all images
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
+          # himinbjorg-portal runs as a container on port 4001; the browser reaches
+          # it via the host's localhost because compose publishes the port.
           MFE_URL="http://localhost:4001/assets/remoteEntry.js"
 
-          for app in heimdall references-api; do
+          for app in heimdall references-api himinbjorg-portal; do
             podman build \
               --file infra/containerfiles/Containerfile.${app} \
               --tag ghcr.io/${{ github.repository_owner }}/${app}:staging \
