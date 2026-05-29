@@ -6,6 +6,7 @@
     "build": "vite build",
     "dev": "vite",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
     "preview": "vite preview",
     "clean": "rm -rf dist"
   },
